@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/models/most_reconnect_policy.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -121,6 +122,8 @@ class FfiModel with ChangeNotifier {
   Timer? _timer;
   Timer? _restartReconnectDelayTimer;
   var _reconnects = 1;
+  final _mostReconnect = MostReconnectPolicy();
+  bool _mostHasRenderedFrame = false;
   DateTime? _offlineReconnectStartTime;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
@@ -1064,6 +1067,12 @@ class FfiModel with ChangeNotifier {
   showMsgBox(SessionID sessionId, String type, String title, String text,
       String link, bool hasRetry, OverlayDialogManager dialogManager,
       {bool? hasCancel}) async {
+    final mostRecovery = isAndroid &&
+        _mostHasRenderedFrame &&
+        title == "Connection Error";
+    final retryDelay = hasRetry
+        ? (mostRecovery ? _mostReconnect.nextDelaySeconds() : _reconnects)
+        : null;
     final noteAllowed = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
         (title == "Connection Error" || type == "restarting");
@@ -1087,15 +1096,16 @@ class FfiModel with ChangeNotifier {
       msgBox(sessionId, type, title, text, link, dialogManager,
           hasCancel: hasCancel,
           reconnect: hasRetry ? reconnect : null,
-          reconnectTimeout: hasRetry ? _reconnects : null,
+          reconnectTimeout: retryDelay,
           onSubmit: onSubmit);
     }
     _timer?.cancel();
-    if (hasRetry) {
-      _timer = Timer(Duration(seconds: _reconnects), () {
-        reconnect(dialogManager, sessionId, false);
+    if (retryDelay != null) {
+      _timer = Timer(Duration(seconds: retryDelay), () {
+        if (parent.target == null || parent.target!.closed) return;
+        reconnect(dialogManager, sessionId, false, automatic: true);
       });
-      _reconnects *= 2;
+      if (!mostRecovery) _reconnects *= 2;
     } else {
       _reconnects = 1;
       _offlineReconnectStartTime = null;
@@ -1114,7 +1124,12 @@ class FfiModel with ChangeNotifier {
   }
 
   void reconnect(OverlayDialogManager dialogManager, SessionID sessionId,
-      bool forceRelay) {
+      bool forceRelay, {bool automatic = false}) {
+    if (!automatic) {
+      _timer?.cancel();
+      _timer = null;
+      _mostReconnect.reset();
+    }
     // Disable relative mouse mode before reconnecting to ensure cursor is released.
     parent.target?.inputModel.setRelativeMouseMode(false);
     _cancelPendingMonitorRestore();
@@ -4326,6 +4341,12 @@ class FFI {
     }
     if (ffiModel.waitForFirstImage.value == true) {
       ffiModel.waitForFirstImage.value = false;
+      if (isAndroid) {
+        ffiModel._mostHasRenderedFrame = true;
+        ffiModel._mostReconnect.reset();
+        ffiModel._timer?.cancel();
+        ffiModel._timer = null;
+      }
       ffiModel.cancelPendingRestoreTimer();
       ffiModel.resetRestartReconnectState();
       dialogManager.dismissAll();
