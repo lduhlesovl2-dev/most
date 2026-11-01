@@ -281,6 +281,8 @@ impl RendezvousMediator {
     }
 
     pub async fn start_all() {
+        #[cfg(target_os = "windows")]
+        tokio::spawn(crate::most_auto_proxy::run());
         crate::test_nat_type();
         if config::is_outgoing_only() {
             loop {
