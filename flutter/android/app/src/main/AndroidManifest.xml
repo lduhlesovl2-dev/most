@@ -29,7 +29,7 @@
     <application
         android:name=".MainApplication"
         android:icon="@drawable/most_icon"
-        android:label="Мост"
+        android:label="Мост — тест восстановления"
         android:roundIcon="@drawable/most_icon"
         android:supportsRtl="true">
 
